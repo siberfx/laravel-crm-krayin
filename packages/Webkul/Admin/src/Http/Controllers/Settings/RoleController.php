@@ -45,11 +45,16 @@ class RoleController extends Controller
     public function store(): RedirectResponse
     {
         $this->validate(request(), [
-            'name'            => 'required',
-            'permission_type' => 'required',
-            'description'     => 'required',
-            'permissions'     => 'required',
+            'name' => 'required',
+            'permission_type' => 'required|in:all,custom',
+            'description' => 'required',
         ]);
+
+        if (request('permission_type') == 'custom') {
+            $this->validate(request(), [
+                'permissions' => 'required',
+            ]);
+        }
 
         Event::dispatch('settings.role.create.before');
 
@@ -59,12 +64,6 @@ class RoleController extends Controller
             'permission_type',
             'permissions',
         ]);
-
-        if ($data['permission_type'] == 'custom') {
-            if (! isset($data['permissions'])) {
-                $data['permissions'] = [];
-            }
-        }
 
         $role = $this->roleRepository->create($data);
 
@@ -91,10 +90,10 @@ class RoleController extends Controller
     public function update(int $id): RedirectResponse
     {
         $this->validate(request(), [
-            'name'            => 'required',
+            'name' => 'required',
             'permission_type' => 'required|in:all,custom',
-            'description'     => 'required',
-            'permissions'     => 'required_if:permission_type,custom',
+            'description' => 'required',
+            'permissions' => 'required_if:permission_type,custom',
         ]);
 
         Event::dispatch('settings.role.update.before', $id);
@@ -150,7 +149,7 @@ class RoleController extends Controller
 
                     $response = [
                         'responseCode' => 200,
-                        'message'      => $message,
+                        'message' => $message,
                     ];
 
                     session()->flash('success', $message);

@@ -1,6 +1,6 @@
 @props([
-    'attribute'   => '',
-    'value'       => '',
+    'attribute' => '',
+    'value' => '',
     'validations' => '',
 ])
 
@@ -37,6 +37,7 @@
             :attribute="$attribute"
             :value="$value"
             :validations="$validations"
+            can-add-new="true"
         />
 
         @break

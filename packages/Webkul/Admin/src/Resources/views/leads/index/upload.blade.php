@@ -3,7 +3,7 @@
         type="button"
         class="secondary-button"
     >
-        @lang('admin::app.leads.index.upload.upload-pdf')
+        @lang('admin::app.leads.index.upload.upload-file')
     </button>
 </v-upload>
 
@@ -18,7 +18,7 @@
                 class="secondary-button"
                 @click="$refs.userUpdateAndCreateModal.open()"
             >
-                @lang('admin::app.leads.index.upload.upload-pdf')
+                @lang('admin::app.leads.index.upload.upload-file')
             </button>
 
             <x-admin::form
@@ -48,28 +48,22 @@
 
                                 <x-admin::form.control-group.control
                                     type="file"
-                                    id="file"
-                                    name="file"
-                                    rules="required|mimes:pdf"
+                                    id="files"
+                                    name="files"
+                                    rules="required|mimes:pdf,bmp,jpeg,jpg,png,webp"
                                     :label="trans('admin::app.leads.index.upload.file')"
                                     ::disabled="isLoading"
+                                    ref="file"
+                                    accept="application/pdf,image/*"
+                                    multiple
                                 />
 
-                                <p class="mt-1 text-xs text-gray-600 dark:text-gray-300">@lang('admin::app.leads.index.upload.file-info')</p>
+                                <p class="mt-1 text-xs text-gray-600 dark:text-gray-300">
+                                    @lang('admin::app.leads.index.upload.file-info')
+                                </p>
 
-                                <x-admin::form.control-group.error control-name="file" />
+                                <x-admin::form.control-group.error control-name="files" />
                             </x-admin::form.control-group>
-
-                            <!-- Sample Downloadable file -->
-                            <a
-                                href="{{ Storage::url('/lead-samples/sample.pdf') }}"
-                                target="_blank"
-                                id="source-sample"
-                                class="cursor-pointer text-sm text-blue-600 transition-all hover:underline"
-                                download
-                            >
-                                @lang('admin::app.leads.index.upload.sample-pdf')
-                            </a>
                         </x-slot>
 
                         <!-- Modal Footer -->
@@ -99,31 +93,44 @@
             },
 
             methods: {
-                create (params, {resetForm, setErrors}) {
+                create(params, { resetForm, setErrors }) {
+                    const selectedFiles = this.$refs.file?.files;
+
+                    if (selectedFiles.length === 0) {
+                        this.$emitter.emit('add-flash', { type: 'error', message: "@lang('admin::app.leads.index.upload.file-required')" });
+
+                        return;
+                    }
+
                     this.isLoading = true;
 
-                    const userForm = new FormData(this.$refs.userForm);
+                    const formData = new FormData();
 
-                    userForm.append('_method', 'post');
+                    selectedFiles.forEach((file, index) => {
+                        formData.append(`files[${index}]`, file);
+                    });
 
-                    this.$axios.post("{{ route('admin.leads.create_by_ai') }}", userForm, {
+                    formData.append('_method', 'post');
+
+                    this.sendRequest(formData);
+                },
+
+                sendRequest(formData) {
+                    this.$axios.post("{{ route('admin.leads.create_by_ai') }}", formData, {
                         headers: {
                             'Content-Type': 'multipart/form-data',
                         }
                     })
-                    .then (response => {
-                        this.isLoading = false;
-
+                    .then(response => {
                         this.$emitter.emit('add-flash', { type: 'success', message: response.data.message });
 
-                        this.$refs.userUpdateAndCreateModal.close();
-
-                        window.location.reload();
+                        this.$parent.$refs.leadsKanban.boot()
                     })
-                    .catch (error => {
-                        this.isLoading = false;
-
+                    .catch(error => {
                         this.$emitter.emit('add-flash', { type: 'error', message: error.response.data.message });
+                    })
+                    .finally(() => {
+                        this.isLoading = false;
 
                         this.$refs.userUpdateAndCreateModal.close();
                     });

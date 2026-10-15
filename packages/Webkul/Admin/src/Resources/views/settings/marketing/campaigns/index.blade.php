@@ -22,7 +22,7 @@
                 </div>
             </div>
 
-            <div class="flex items-center gap-x-2.5">                
+            <div class="flex items-center gap-x-2.5">
                 <!-- Create button for Campaings -->
                 <div class="flex items-center gap-x-2.5">
                     {!! view_render_event('admin.settings.marketing.campaigns.index.breadcrumbs.after') !!}
@@ -31,7 +31,7 @@
                         <button
                             type="button"
                             class="primary-button"
-                            @click="$refs.marketingCampaigns.actionType = 'create';$refs.marketingCampaigns.toggleModal()"
+                            @click="$refs.marketingCampaigns.handleCreate()"
                         >
                             @lang('admin::app.settings.marketing.campaigns.index.create-btn')
                         </button>
@@ -41,15 +41,15 @@
                 </div>
             </div>
         </div>
-        
+
         <v-campaigns ref="marketingCampaigns">
             <x-admin::shimmer.datagrid />
         </v-campaigns>
     </div>
 
     @pushOnce('scripts')
-        <script 
-            type="text/x-template" 
+        <script
+            type="text/x-template"
             id="v-campaigns-template"
         >
             <div>
@@ -69,11 +69,11 @@
                         <template v-if="isLoading">
                             <x-admin::shimmer.datagrid.table.body />
                         </template>
-            
+
                         <template v-else>
                             <div
                                 v-for="record in available.records"
-                                class="row grid items-center gap-2.5 border-b px-4 py-4 text-gray-600 transition-all hover:bg-gray-50 dark:border-gray-800 dark:text-gray-300 dark:hover:bg-gray-950"
+                                class="row grid items-center gap-2.5 border-b px-4 py-4 text-gray-600 transition-all hover:bg-gray-50 dark:border-gray-800 dark:text-gray-300 dark:hover:bg-gray-950 max-lg:hidden"
                                 :style="`grid-template-columns: repeat(${gridsCount}, minmax(0, 1fr))`"
                             >
                                 <!-- Mass Actions, Title and Created By -->
@@ -94,10 +94,10 @@
                                         ></label>
                                     </div>
                                 @endif
-                                
+
                                 <!-- Id -->
                                 <p>@{{ record.id }}</p>
-            
+
                                 <!-- Name -->
                                 <p>@{{ record.name }}</p>
 
@@ -134,50 +134,115 @@
                                     @endif
                                 </div>
                             </div>
+
+                            <!-- Mobile Card View -->
+                            <div
+                                class="hidden border-b px-4 py-4 text-black dark:border-gray-800 dark:text-gray-300 max-lg:block"
+                                v-for="record in available.records"
+                            >
+                                <div class="mb-2 flex items-center justify-between">
+                                    <!-- Mass Actions for Mobile Cards -->
+                                    <div class="flex w-full items-center justify-between gap-2">
+                                        @if (bouncer()->hasPermission('settings.automation.campaigns.mass_delete'))
+                                            <p v-if="available.massActions.length">
+                                                <label :for="`mass_action_select_record_${record[available.meta.primary_column]}`">
+                                                    <input
+                                                        type="checkbox"
+                                                        :name="`mass_action_select_record_${record[available.meta.primary_column]}`"
+                                                        :value="record[available.meta.primary_column]"
+                                                        :id="`mass_action_select_record_${record[available.meta.primary_column]}`"
+                                                        class="peer hidden"
+                                                        v-model="applied.massActions.indices"
+                                                    >
+
+                                                    <span class="icon-checkbox-outline peer-checked:icon-checkbox-select cursor-pointer rounded-md text-2xl text-gray-500 peer-checked:text-brandColor">
+                                                    </span>
+                                                </label>
+                                            </p>
+                                        @endif
+
+                                        <!-- Actions for Mobile -->
+                                        <div
+                                            class="flex w-full items-center justify-end"
+                                            v-if="available.actions.length"
+                                        >
+                                            @if (bouncer()->hasPermission('settings.automation.campaigns.edit'))
+                                                <a @click.prevent="actionType = 'edit';edit(record)">
+                                                    <span
+                                                        :class="record.actions.find(action => action.index === 'edit')?.icon"
+                                                        class="cursor-pointer rounded-md p-1.5 text-2xl transition-all hover:bg-gray-200 dark:hover:bg-gray-800 max-sm:place-self-center"
+                                                    >
+                                                    </span>
+                                                </a>
+                                            @endif
+
+                                            @if (bouncer()->hasPermission('settings.automation.campaigns.delete'))
+                                                <a @click.prevent="performAction(record.actions.find(action => action.index === 'delete'))">
+                                                    <span
+                                                        :class="record.actions.find(action => action.index === 'delete')?.icon"
+                                                        class="cursor-pointer rounded-md p-1.5 text-2xl transition-all hover:bg-gray-200 dark:hover:bg-gray-800 max-sm:place-self-center"
+                                                    >
+                                                    </span>
+                                                </a>
+                                            @endif
+                                        </div>
+                                    </div>
+                                </div>
+
+                                <!-- Card Content -->
+                                <div class="grid gap-2">
+                                    <template v-for="column in available.columns">
+                                        <div class="flex flex-wrap items-baseline gap-x-2">
+                                            <span class="text-slate-600 dark:text-gray-300" v-html="column.label + ':'"></span>
+                                            <span class="break-words font-medium text-slate-900 dark:text-white" v-html="record[column.index]"></span>
+                                        </div>
+                                    </template>
+                                </div>
+                            </div>
                         </template>
                     </template>
                 </x-admin::datagrid>
 
                 <Teleport to="body">
                     {!! view_render_event('admin.settings.marketing.campaigns.index.form_controls.before') !!}
-        
+
                     <x-admin::form
                         v-slot="{ meta, errors, handleSubmit }"
                         as="div"
                     >
-                        <form 
+                        <form
                             @submit="handleSubmit($event, createOrUpdate)"
                             ref="campaignForm"
                         >
                             {!! view_render_event('admin.settings.marketing.campaigns.index.form_controls.modal.before') !!}
-        
+
                             <x-admin::modal ref="campaignModal">
                                 <x-slot:header>
                                     {!! view_render_event('admin.settings.marketing.campaigns.index.form_controls.modal.header.dropdown.before') !!}
-        
+
                                     <p class="text-lg font-bold text-gray-800 dark:text-white">
-                                        @{{ 
+                                        @{{
                                             actionType == 'create'
                                             ? "@lang('admin::app.settings.marketing.campaigns.index.create.title')"
-                                            : "@lang('admin::app.settings.marketing.campaigns.index.edit.title')" 
+                                            : "@lang('admin::app.settings.marketing.campaigns.index.edit.title')"
                                         }}
                                     </p>
 
                                     {!! view_render_event('admin.settings.marketing.campaigns.index.form_controls.modal.header.dropdown.after') !!}
                                 </x-slot>
-        
+
                                 <x-slot:content>
                                     {!! view_render_event('admin.settings.marketing.campaigns.index.form_controls.modal.content.controls.before') !!}
-        
+
                                     <!-- Name -->
                                     <x-admin::form.control-group>
-                                        <x-admin::form.control-group.label 
+                                        <x-admin::form.control-group.label
                                             class="required"
                                             for="name"
                                         >
                                             @lang('admin::app.settings.marketing.campaigns.index.create.name')
                                         </x-admin::form.control-group.label>
-                                        
+
                                         <x-admin::form.control-group.control
                                             type="hidden"
                                             name="id"
@@ -192,10 +257,10 @@
                                             ::value="campaign.name"
                                             :label="trans('admin::app.settings.marketing.campaigns.index.create.name')"
                                         />
-        
+
                                         <x-admin::form.control-group.error control-name="name" />
                                     </x-admin::form.control-group>
-        
+
                                     <!-- Subject -->
                                     <x-admin::form.control-group>
                                         <x-admin::form.control-group.label
@@ -204,7 +269,7 @@
                                         >
                                             @lang('admin::app.settings.marketing.campaigns.index.create.subject')
                                         </x-admin::form.control-group.label>
-                                        
+
                                         <x-admin::form.control-group.control
                                             type="text"
                                             name="subject"
@@ -214,13 +279,13 @@
                                             ::value="campaign.subject"
                                             :label="trans('admin::app.settings.marketing.campaigns.index.create.subject')"
                                         />
-        
+
                                         <x-admin::form.control-group.error control-name="subject" />
                                     </x-admin::form.control-group>
 
                                     <!-- Event -->
                                     <x-admin::form.control-group>
-                                        <x-admin::form.control-group.label 
+                                        <x-admin::form.control-group.label
                                             class="required"
                                             for="marketing_event_id"
                                         >
@@ -276,36 +341,31 @@
 
                                     <!-- Status -->
                                     <x-admin::form.control-group>
-                                        <x-admin::form.control-group.label>
+                                        <x-admin::form.control-group.label for="status">
                                             @lang('admin::app.settings.marketing.campaigns.index.create.status')
                                         </x-admin::form.control-group.label>
-        
+
                                         <input
                                             type="hidden"
                                             name="status"
                                             :value="0"
                                         />
-                                
-                                        <label class="relative inline-flex cursor-pointer items-center">
-                                            <input  
-                                                type="checkbox"
-                                                name="status"
-                                                :value="1"
-                                                id="status"
-                                                class="peer sr-only"
-                                                :checked="parseInt(campaign.status || 0)"
-                                            >
-        
-                                            <div class="peer h-5 w-9 cursor-pointer rounded-full bg-gray-200 after:absolute after:top-0.5 after:h-4 after:w-4 after:rounded-full after:border after:border-gray-300 after:bg-white after:transition-all after:content-[''] peer-checked:bg-blue-600 peer-checked:after:border-white peer-focus:outline-none peer-focus:ring-blue-300 dark:bg-gray-800 dark:after:border-white dark:after:bg-white dark:peer-checked:bg-gray-950 after:ltr:left-0.5 peer-checked:after:ltr:translate-x-full after:rtl:right-0.5 peer-checked:after:rtl:-translate-x-full"></div>
-                                        </label>
+
+                                        <x-admin::form.control-group.control
+                                            type="switch"
+                                            name="status"
+                                            value="1"
+                                            :label="trans('admin::app.settings.marketing.campaigns.index.create.status')"
+                                            ::checked="parseInt(campaign.status || 0)"
+                                        />
                                     </x-admin::form.control-group>
 
                                     {!! view_render_event('admin.settings.marketing.campaigns.index.form_controls.modal.content.controls.after') !!}
                                 </x-slot>
-        
+
                                 <x-slot:footer>
                                     {!! view_render_event('admin.components.activities.actions.activity.form_controls.modal.footer.save_button.before') !!}
-        
+
                                     <!-- Save Button -->
                                     <x-admin::button
                                         type="submit"
@@ -314,15 +374,15 @@
                                         ::loading="isStoring"
                                         ::disabled="isStoring"
                                     />
-        
+
                                     {!! view_render_event('admin.components.activities.actions.activity.form_controls.modal.footer.save_button.after') !!}
                                 </x-slot>
                             </x-admin::modal>
-        
+
                             {!! view_render_event('admin.components.activities.actions.activity.form_controls.modal.after') !!}
                         </form>
                     </x-admin::form>
-        
+
                     {!! view_render_event('admin.components.activities.actions.activity.form_controls.after') !!}
                 </Teleport>
             </div>
@@ -349,15 +409,15 @@
                 computed: {
                     gridsCount() {
                         let count = this.$refs.datagrid.available.columns.length;
-        
+
                         if (this.$refs.datagrid.available.actions.length) {
                             ++count;
                         }
-        
+
                         if (this.$refs.datagrid.available.massActions.length) {
                             ++count;
                         }
-        
+
                         return count;
                     },
                 },
@@ -371,38 +431,46 @@
                 methods: {
                     /**
                      * Toggle the modal.
-                     * 
+                     *
                      * @return {void}
                      */
                     toggleModal() {
                         this.$refs.campaignModal.toggle();
                     },
 
+                    handleCreate() {
+                        this.actionType = 'create';
+
+                        this.campaign = {};
+
+                        this.toggleModal();
+                    },
+
                     /**
                      * Get the all marketing events.
-                     * 
+                     *
                      * @return {void}
                      */
                     getEvents() {
-                        this.$axios.get('{{ route('admin.settings.marketing.campaigns.events') }}')
+                        this.$axios.get("{{ route('admin.settings.marketing.campaigns.events') }}")
                             .then(response => this.events = response.data.data)
                             .catch(error => {});
                     },
 
                     /**
                      * Get the all Email Templates.
-                     * 
+                     *
                      * @return {void}
                      */
                     getEmailTemplates() {
-                        this.$axios.get('{{ route('admin.settings.marketing.campaigns.email-templates') }}')
+                        this.$axios.get("{{ route('admin.settings.marketing.campaigns.email-templates') }}")
                             .then(response => this.emailTemplates = response.data.data)
                             .catch(error => {});
                     },
 
                     /**
                      * Create or Update the campaigns.
-                     * 
+                     *
                      * @param {Object} params
                      * @param {Function} helpers.resetForm
                      * @param {Function} helpers.setErrors
@@ -419,8 +487,8 @@
 
                         this.$axios.post(
                             isUpdating
-                            ? `{{ route('admin.settings.marketing.campaigns.update', '') }}/${paramas.id}`
-                            : '{{ route('admin.settings.marketing.campaigns.store') }}', 
+                            ? "{{ route('admin.settings.marketing.campaigns.update', ':id') }}".replace(':id', paramas.id)
+                            : "{{ route('admin.settings.marketing.campaigns.store') }}",
                             campaignForm,
                         )
                             .then(response => {
@@ -438,11 +506,11 @@
 
                     /**
                      * Get the particular campaign record, so that we can use for edit.
-                     * 
+                     *
                      * @param {Object} record
                      */
                     edit(record) {
-                        this.$axios.get(`{{ route('admin.settings.marketing.campaigns.edit', '') }}/${record.id}`)
+                        this.$axios.get("{{ route('admin.settings.marketing.campaigns.edit', ':id') }}".replace(':id', record.id))
                             .then(response => {
                                 this.campaign = response.data.data;
 

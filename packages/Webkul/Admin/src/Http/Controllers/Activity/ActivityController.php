@@ -69,11 +69,11 @@ class ActivityController extends Controller
     public function store(): RedirectResponse|JsonResponse
     {
         $this->validate(request(), [
-            'type'          => 'required',
-            'comment'       => 'required_if:type,note',
+            'type' => 'required',
+            'comment' => 'required_if:type,note',
             'schedule_from' => 'required_unless:type,note,file',
-            'schedule_to'   => 'required_unless:type,note,file',
-            'file'          => 'required_if:type,file',
+            'schedule_to' => 'required_unless:type,note,file',
+            'file' => 'required_if:type,file',
         ]);
 
         if (request('type') === 'meeting') {
@@ -111,7 +111,7 @@ class ActivityController extends Controller
 
         if (request()->ajax()) {
             return response()->json([
-                'data'    => new ActivityResource($activity),
+                'data' => new ActivityResource($activity),
                 'message' => trans('admin::app.activities.create-success'),
             ]);
         }
@@ -142,13 +142,28 @@ class ActivityController extends Controller
     {
         Event::dispatch('activity.update.before', $id);
 
-        $activity = $this->activityRepository->update(request()->all(), $id);
+        $data = request()->all();
+
+        $activity = $this->activityRepository->update($data, $id);
+
+        /**
+         * We will not use `empty` directly here because `lead_id` can be a blank string
+         * from the activity form. However, on the activity view page, we are only updating the
+         * `is_done` field, so `lead_id` will not be present in that case.
+         */
+        if (isset($data['lead_id'])) {
+            $activity->leads()->sync(
+                ! empty($data['lead_id'])
+                    ? [$data['lead_id']]
+                    : []
+            );
+        }
 
         Event::dispatch('activity.update.after', $activity);
 
         if (request()->ajax()) {
             return response()->json([
-                'data'    => new ActivityResource($activity),
+                'data' => new ActivityResource($activity),
                 'message' => trans('admin::app.activities.update-success'),
             ]);
         }

@@ -62,12 +62,15 @@ class QuoteController extends Controller
      */
     public function store(AttributeForm $request): RedirectResponse
     {
+        $this->additionalValidation();
         Event::dispatch('quote.create.before');
 
         $quote = $this->quoteRepository->create($request->all());
 
-        if (request('lead_id')) {
-            $lead = $this->leadRepository->find(request('lead_id'));
+        $leadId = request('lead_id');
+
+        if ($leadId) {
+            $lead = $this->leadRepository->find($leadId);
 
             $lead->quotes()->attach($quote->id);
         }
@@ -76,7 +79,9 @@ class QuoteController extends Controller
 
         session()->flash('success', trans('admin::app.quotes.index.create-success'));
 
-        return redirect()->route('admin.quotes.index');
+        return request()->query('from') === 'lead' && $leadId
+            ? redirect()->route('admin.leads.view', ['id' => $leadId, 'from' => 'quotes'])
+            : redirect()->route('admin.quotes.index');
     }
 
     /**
@@ -94,14 +99,17 @@ class QuoteController extends Controller
      */
     public function update(AttributeForm $request, int $id): RedirectResponse
     {
+        $this->additionalValidation();
         Event::dispatch('quote.update.before', $id);
 
         $quote = $this->quoteRepository->update($request->all(), $id);
 
         $quote->leads()->detach();
 
-        if (request('lead_id')) {
-            $lead = $this->leadRepository->find(request('lead_id'));
+        $leadId = request('lead_id');
+
+        if ($leadId) {
+            $lead = $this->leadRepository->find($leadId);
 
             $lead->quotes()->attach($quote->id);
         }
@@ -110,7 +118,9 @@ class QuoteController extends Controller
 
         session()->flash('success', trans('admin::app.quotes.index.update-success'));
 
-        return redirect()->route('admin.quotes.index');
+        return request()->query('from') === 'lead' && $leadId
+            ? redirect()->route('admin.leads.view', ['id' => $leadId, 'from' => 'quotes'])
+            : redirect()->route('admin.quotes.index');
     }
 
     /**
@@ -186,5 +196,22 @@ class QuoteController extends Controller
             view('admin::quotes.pdf', compact('quote'))->render(),
             'Quote_'.$quote->subject.'_'.$quote->created_at->format('d-m-Y')
         );
+    }
+
+    /**
+     * Additional validation for quote product items.
+     */
+    private function additionalValidation(): void
+    {
+        $this->validate(request(), [
+            'items' => 'required|array',
+            'items.*.product_id' => 'required|exists:products,id',
+            'items.*.quantity' => 'required|numeric|min:0',
+            'items.*.price' => 'required|numeric|min:0',
+            'items.*.total' => 'required|numeric|min:0',
+            'items.*.discount_amount' => 'required|numeric|min:0',
+            'items.*.tax_amount' => 'required|numeric|min:0',
+            'items.*.final_total' => 'required|numeric|min:0',
+        ]);
     }
 }

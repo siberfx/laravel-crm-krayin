@@ -9,9 +9,17 @@ use Illuminate\Routing\Router;
 use Illuminate\Support\Facades\Blade;
 use Illuminate\Support\Facades\Route;
 use Illuminate\Support\ServiceProvider;
+use Webkul\Admin\Bouncer;
 use Webkul\Admin\Exceptions\Handler;
 use Webkul\Admin\Http\Middleware\Bouncer as BouncerMiddleware;
 use Webkul\Admin\Http\Middleware\Locale;
+use Webkul\Admin\Http\Middleware\SanitizeUrl;
+use Webkul\Contact\Models\Organization;
+use Webkul\Contact\Models\Person;
+use Webkul\Lead\Models\Lead;
+use Webkul\Product\Models\Product;
+use Webkul\Quote\Models\Quote;
+use Webkul\Warehouse\Models\Warehouse;
 
 class AdminServiceProvider extends ServiceProvider
 {
@@ -23,6 +31,8 @@ class AdminServiceProvider extends ServiceProvider
         $router->aliasMiddleware('user', BouncerMiddleware::class);
 
         $router->aliasMiddleware('admin_locale', Locale::class);
+
+        $router->aliasMiddleware('sanitize_url', SanitizeUrl::class);
 
         include __DIR__.'/../Http/helpers.php';
 
@@ -44,12 +54,12 @@ class AdminServiceProvider extends ServiceProvider
         $this->app->bind(ExceptionHandler::class, Handler::class);
 
         Relation::morphMap([
-            'leads'         => \Webkul\Lead\Models\Lead::class,
-            'organizations' => \Webkul\Contact\Models\Organization::class,
-            'persons'       => \Webkul\Contact\Models\Person::class,
-            'products'      => \Webkul\Product\Models\Product::class,
-            'quotes'        => \Webkul\Quote\Models\Quote::class,
-            'warehouses'    => \Webkul\Warehouse\Models\Warehouse::class,
+            'leads' => Lead::class,
+            'organizations' => Organization::class,
+            'persons' => Person::class,
+            'products' => Product::class,
+            'quotes' => Quote::class,
+            'warehouses' => Warehouse::class,
         ]);
 
         $this->app->register(EventServiceProvider::class);
@@ -77,7 +87,7 @@ class AdminServiceProvider extends ServiceProvider
         $loader->alias('Bouncer', \Webkul\Admin\Facades\Bouncer::class);
 
         $this->app->singleton('bouncer', function () {
-            return new \Webkul\Admin\Bouncer;
+            return new Bouncer;
         });
     }
 

@@ -2,6 +2,7 @@
 
 namespace Webkul\Admin\Http\Controllers\Contact\Persons;
 
+use Exception;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Resources\Json\JsonResource;
@@ -54,13 +55,13 @@ class PersonController extends Controller
     {
         Event::dispatch('contacts.person.create.before');
 
-        $person = $this->personRepository->create($this->sanitizeRequestedPersonData($request->all()));
+        $person = $this->personRepository->create($request->all());
 
         Event::dispatch('contacts.person.create.after', $person);
 
         if (request()->ajax()) {
             return response()->json([
-                'data'    => $person,
+                'data' => $person,
                 'message' => trans('admin::app.contacts.persons.index.create-success'),
             ]);
         }
@@ -97,13 +98,13 @@ class PersonController extends Controller
     {
         Event::dispatch('contacts.person.update.before', $id);
 
-        $person = $this->personRepository->update($this->sanitizeRequestedPersonData($request->all()), $id);
+        $person = $this->personRepository->update($request->all(), $id);
 
         Event::dispatch('contacts.person.update.after', $person);
 
         if (request()->ajax()) {
             return response()->json([
-                'data'    => $person,
+                'data' => $person,
                 'message' => trans('admin::app.contacts.persons.index.update-success'),
             ], 200);
         }
@@ -138,17 +139,27 @@ class PersonController extends Controller
     {
         $person = $this->personRepository->findOrFail($id);
 
+        if (
+            $person->leads
+            && $person->leads->count() > 0
+        ) {
+            return response()->json([
+                'message' => trans('admin::app.contacts.persons.index.delete-failed'),
+            ], 400);
+        }
+
         try {
-            Event::dispatch('contacts.person.delete.before', $id);
+            Event::dispatch('contacts.person.delete.before', $person);
 
-            $person->delete($id);
+            $person->delete();
 
-            Event::dispatch('contacts.person.delete.after', $id);
+            Event::dispatch('contacts.person.delete.after', $person);
 
             return response()->json([
                 'message' => trans('admin::app.contacts.persons.index.delete-success'),
             ], 200);
-        } catch (\Exception $exception) {
+
+        } catch (Exception $exception) {
             return response()->json([
                 'message' => trans('admin::app.contacts.persons.index.delete-failed'),
             ], 400);
@@ -156,45 +167,69 @@ class PersonController extends Controller
     }
 
     /**
-     * Mass Delete the specified resources.
+     * Mass destroy the specified resources from storage.
      */
-    public function massDestroy(MassDestroyRequest $massDestroyRequest): JsonResponse
+    public function massDestroy(MassDestroyRequest $request): JsonResponse
     {
-        $persons = $this->personRepository->findWhereIn('id', $massDestroyRequest->input('indices'));
+        try {
+            $persons = $this->personRepository->findWhereIn('id', $request->input('indices', []));
 
-        foreach ($persons as $person) {
-            Event::dispatch('contact.person.delete.before', $person);
+            $deletedCount = 0;
 
-            $this->personRepository->delete($person->id);
+            $blockedCount = 0;
 
-            Event::dispatch('contact.person.delete.after', $person);
+            foreach ($persons as $person) {
+                if (
+                    $person->leads
+                    && $person->leads->count() > 0
+                ) {
+                    $blockedCount++;
+
+                    continue;
+                }
+
+                Event::dispatch('contact.person.delete.before', $person);
+
+                $this->personRepository->delete($person->id);
+
+                Event::dispatch('contact.person.delete.after', $person);
+
+                $deletedCount++;
+            }
+
+            $statusCode = 200;
+
+            switch (true) {
+                case $deletedCount > 0 && $blockedCount === 0:
+                    $message = trans('admin::app.contacts.persons.index.all-delete-success');
+
+                    break;
+
+                case $deletedCount > 0 && $blockedCount > 0:
+                    $message = trans('admin::app.contacts.persons.index.partial-delete-warning');
+
+                    break;
+
+                case $deletedCount === 0 && $blockedCount > 0:
+                    $message = trans('admin::app.contacts.persons.index.none-delete-warning');
+
+                    $statusCode = 400;
+
+                    break;
+
+                default:
+                    $message = trans('admin::app.contacts.persons.index.no-selection');
+
+                    $statusCode = 400;
+
+                    break;
+            }
+
+            return response()->json(['message' => $message], $statusCode);
+        } catch (Exception $exception) {
+            return response()->json([
+                'message' => trans('admin::app.contacts.persons.index.delete-failed'),
+            ], 400);
         }
-
-        return response()->json([
-            'message' => trans('admin::app.contacts.persons.index.delete-success'),
-        ]);
-    }
-
-    /**
-     * Sanitize requested person data and return the clean array.
-     */
-    private function sanitizeRequestedPersonData(array $data): array
-    {
-        if (
-            array_key_exists('organization_id', $data)
-            && empty($data['organization_id'])
-        ) {
-            $data['organization_id'] = null;
-        }
-
-        $data['unique_id'] = $data['user_id'].'|'.$data['organization_id'].'|'.$data['emails'][0]['value'];
-
-        if (isset($data['contact_numbers'])) {
-            $data['contact_numbers'] = collect($data['contact_numbers'])->filter(fn ($number) => ! is_null($number['value']))->toArray();
-
-            $data['unique_id'] .= '|'.$data['contact_numbers'][0]['value'];
-        }
-
-        return $data;
     }
 }

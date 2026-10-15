@@ -33,7 +33,7 @@
                     v-if="report.statistics.length"
                 >
                     <a
-                        :href="`{{route('admin.contacts.persons.view', '')}}/${item.id}`"
+                        :href="'{{ route('admin.contacts.persons.view', ':id') }}'.replace(':id', item.id)"
                         class="flex gap-2.5 border-b p-4 transition-all last:border-b-0 hover:bg-gray-50 dark:border-gray-800 dark:hover:bg-gray-950"
                         target="_blank"
                         v-for="item in report.statistics"

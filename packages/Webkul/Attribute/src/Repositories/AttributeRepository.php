@@ -4,6 +4,7 @@ namespace Webkul\Attribute\Repositories;
 
 use Illuminate\Container\Container;
 use Illuminate\Support\Str;
+use Webkul\Attribute\Contracts\Attribute;
 use Webkul\Core\Eloquent\Repository;
 
 class AttributeRepository extends Repository
@@ -31,7 +32,7 @@ class AttributeRepository extends Repository
     }
 
     /**
-     * @return \Webkul\Attribute\Contracts\Attribute
+     * @return Attribute
      */
     public function create(array $data)
     {
@@ -45,7 +46,7 @@ class AttributeRepository extends Repository
             foreach ($options as $optionInputs) {
                 $this->attributeOptionRepository->create(array_merge([
                     'attribute_id' => $attribute->id,
-                    'sort_order'   => $sortOrder++,
+                    'sort_order' => $sortOrder++,
                 ], $optionInputs));
             }
         }
@@ -56,7 +57,7 @@ class AttributeRepository extends Repository
     /**
      * @param  int  $id
      * @param  string  $attribute
-     * @return \Webkul\Attribute\Contracts\Attribute
+     * @return Attribute
      */
     public function update(array $data, $id, $attribute = 'id')
     {
@@ -95,7 +96,7 @@ class AttributeRepository extends Repository
 
     /**
      * @param  string  $code
-     * @return \Webkul\Attribute\Contracts\Attribute
+     * @return Attribute
      */
     public function getAttributeByCode($code)
     {
@@ -128,11 +129,16 @@ class AttributeRepository extends Repository
             $currentUser = auth()->guard('user')->user();
 
             if ($currentUser?->view_permission === 'group') {
-                return $userRepository->leftJoin('user_groups', 'users.id', '=', 'user_groups.user_id')
-                    ->where('users.name', 'like', '%'.urldecode($query).'%')
+                $query = urldecode($query);
+
+                $userIds = bouncer()->getAuthorizedUserIds();
+
+                return $userRepository
+                    ->when(! empty($userIds), fn ($queryBuilder) => $queryBuilder->whereIn('users.id', $userIds))
+                    ->when(! empty($query), fn ($queryBuilder) => $queryBuilder->where('users.name', 'like', "%{$query}%"))
                     ->get();
             } elseif ($currentUser?->view_permission === 'individual') {
-                return $userRepository->where('users.id', $currentUser->id);
+                return $userRepository->where('users.id', $currentUser->id)->get();
             }
 
             return $userRepository->where('users.name', 'like', '%'.urldecode($query).'%')->get();

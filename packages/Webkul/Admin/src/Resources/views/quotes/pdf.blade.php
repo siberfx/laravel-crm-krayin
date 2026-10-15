@@ -19,19 +19,19 @@
             if ($locale == 'en') {
                 $fontFamily = [
                     'regular' => 'DejaVu Sans',
-                    'bold'    => 'DejaVu Sans',
+                    'bold' => 'DejaVu Sans',
                 ];
             }  else {
                 $fontFamily = [
                     'regular' => 'Arial, sans-serif',
-                    'bold'    => 'Arial, sans-serif',
+                    'bold' => 'Arial, sans-serif',
                 ];
             }
 
             if (in_array($locale, ['ar', 'fa', 'tr'])) {
                 $fontFamily = [
                     'regular' => 'DejaVu Sans',
-                    'bold'    => 'DejaVu Sans',
+                    'bold' => 'DejaVu Sans',
                 ];
             }
         @endphp

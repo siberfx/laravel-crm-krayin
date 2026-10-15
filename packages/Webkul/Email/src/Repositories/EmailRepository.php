@@ -2,11 +2,19 @@
 
 namespace Webkul\Email\Repositories;
 
+use Illuminate\Container\Container;
 use Webkul\Core\Eloquent\Repository;
 use Webkul\Email\Contracts\Email;
 
 class EmailRepository extends Repository
 {
+    public function __construct(
+        protected AttachmentRepository $attachmentRepository,
+        Container $container
+    ) {
+        parent::__construct($container);
+    }
+
     /**
      * Specify model class name.
      *
@@ -20,7 +28,7 @@ class EmailRepository extends Repository
     /**
      * Create.
      *
-     * @return \Webkul\Email\Contracts\Email
+     * @return Email
      */
     public function create(array $data)
     {
@@ -35,16 +43,20 @@ class EmailRepository extends Repository
         }
 
         $data = $this->sanitizeEmails(array_merge([
-            'source'        => 'web',
-            'from'          => config('mail.from.address'),
-            'user_type'     => 'admin',
-            'folders'       => isset($data['is_draft']) ? ['draft'] : ['outbox'],
-            'unique_id'     => $uniqueId,
-            'message_id'    => $uniqueId,
+            'source' => 'web',
+            'from' => config('mail.from.address'),
+            'user_type' => 'admin',
+            'folders' => isset($data['is_draft']) ? ['draft'] : ['outbox'],
+            'unique_id' => $uniqueId,
+            'message_id' => $uniqueId,
             'reference_ids' => array_merge($referenceIds, [$uniqueId]),
         ], $data));
 
-        return parent::create($data);
+        $email = parent::create($data);
+
+        $this->attachmentRepository->uploadAttachments($email, $data);
+
+        return $email;
     }
 
     /**
@@ -52,7 +64,7 @@ class EmailRepository extends Repository
      *
      * @param  int  $id
      * @param  string  $attribute
-     * @return \Webkul\Email\Contracts\Email
+     * @return Email
      */
     public function update(array $data, $id, $attribute = 'id')
     {

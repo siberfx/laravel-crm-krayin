@@ -74,17 +74,15 @@ class WebFormController extends Controller
     public function store(): RedirectResponse
     {
         $this->validate(request(), [
-            'title'                  => 'required',
-            'submit_button_label'    => 'required',
-            'submit_success_action'  => 'required',
+            'title' => 'required',
+            'submit_button_label' => 'required',
+            'submit_success_action' => 'required',
             'submit_success_content' => 'required',
         ]);
 
         Event::dispatch('settings.web_forms.create.before');
 
         $data = request()->all();
-
-        $data['create_lead'] = isset($data['create_lead']) ? 1 : 0;
 
         $webForm = $this->webFormRepository->create($data);
 
@@ -116,17 +114,15 @@ class WebFormController extends Controller
     public function update(int $id): RedirectResponse
     {
         $this->validate(request(), [
-            'title'                  => 'required',
-            'submit_button_label'    => 'required',
-            'submit_success_action'  => 'required',
+            'title' => 'required',
+            'submit_button_label' => 'required',
+            'submit_success_action' => 'required',
             'submit_success_content' => 'required',
         ]);
 
         Event::dispatch('settings.web_forms.update.before', $id);
 
         $data = request()->all();
-
-        $data['create_lead'] = isset($data['create_lead']) ? 1 : 0;
 
         $webForm = $this->webFormRepository->update($data, $id);
 

@@ -1,9 +1,9 @@
 @props([
-    'isMultiRow'         => false,
-    'toolbarLeftBefore'  => null,
-    'toolbarLeftAfter'   => null,
+    'isMultiRow' => false,
+    'toolbarLeftBefore' => null,
+    'toolbarLeftAfter' => null,
     'toolbarRightBefore' => null,
-    'toolbarRightAfter'  => null,
+    'toolbarRightAfter' => null,
 ])
 
 <v-datagrid {{ $attributes }}>

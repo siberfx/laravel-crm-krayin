@@ -3,6 +3,7 @@
 namespace Webkul\DataTransfer\Helpers\Importers\Persons;
 
 use Illuminate\Support\Arr;
+use Illuminate\Support\Collection;
 use Illuminate\Support\Facades\Event;
 use Illuminate\Support\Facades\Validator;
 use Webkul\Attribute\Repositories\AttributeRepository;
@@ -46,9 +47,9 @@ class Importer extends AbstractImporter
      * Error message templates.
      */
     protected array $messages = [
-        self::ERROR_EMAIL_NOT_FOUND_FOR_DELETE  => 'data_transfer::app.importers.persons.validation.errors.email-not-found',
-        self::ERROR_DUPLICATE_EMAIL             => 'data_transfer::app.importers.persons.validation.errors.duplicate-email',
-        self::ERROR_DUPLICATE_PHONE             => 'data_transfer::app.importers.persons.validation.errors.duplicate-phone',
+        self::ERROR_EMAIL_NOT_FOUND_FOR_DELETE => 'data_transfer::app.importers.persons.validation.errors.email-not-found',
+        self::ERROR_DUPLICATE_EMAIL => 'data_transfer::app.importers.persons.validation.errors.duplicate-email',
+        self::ERROR_DUPLICATE_PHONE => 'data_transfer::app.importers.persons.validation.errors.duplicate-phone',
     ];
 
     /**
@@ -150,14 +151,14 @@ class Importer extends AbstractImporter
          */
         $validator = Validator::make($rowData, [
             ...$this->getValidationRules('persons', $rowData),
-            'organization_id'         => 'required|exists:organizations,id',
-            'user_id'                 => 'required|exists:users,id',
-            'contact_numbers'         => 'required|array',
+            'organization_id' => 'required|exists:organizations,id',
+            'user_id' => 'required|exists:users,id',
+            'contact_numbers' => 'required|array',
             'contact_numbers.*.value' => 'required|numeric',
             'contact_numbers.*.label' => 'required|in:home,work',
-            'emails'                  => 'required|array',
-            'emails.*.value'          => 'required|email',
-            'emails.*.label'          => 'required|in:home,work',
+            'emails' => 'required|array',
+            'emails.*.value' => 'required|email',
+            'emails.*.label' => 'required|in:home,work',
         ]);
 
         if ($validator->fails()) {
@@ -230,7 +231,7 @@ class Importer extends AbstractImporter
         $batch = $this->importBatchRepository->update([
             'state' => Import::STATE_PROCESSED,
 
-            'summary'      => [
+            'summary' => [
                 'created' => $this->getCreatedItemsCount(),
                 'updated' => $this->getUpdatedItemsCount(),
                 'deleted' => $this->getDeletedItemsCount(),
@@ -305,14 +306,20 @@ class Importer extends AbstractImporter
 
         $persons = [];
 
+        $attributeValues = [];
+
         /**
          * Prepare persons for import.
          */
         foreach ($batch->data as $rowData) {
             $this->preparePersons($rowData, $persons);
+
+            $this->prepareAttributeValues($rowData, $attributeValues);
         }
 
         $this->savePersons($persons);
+
+        $this->saveAttributeValues($attributeValues);
 
         return true;
     }
@@ -322,14 +329,7 @@ class Importer extends AbstractImporter
      */
     public function preparePersons(array $rowData, array &$persons): void
     {
-        $emails = collect($rowData['emails'])
-            ->map(function ($emails) {
-                $emails = json_decode($emails, true);
-
-                foreach ($emails as $email) {
-                    return $email['value'];
-                }
-            });
+        $emails = $this->prepareEmail($rowData['emails']);
 
         foreach ($emails as $email) {
             $contactNumber = json_decode($rowData['contact_numbers'], true);
@@ -366,7 +366,47 @@ class Importer extends AbstractImporter
             $this->createdItemsCount += count($persons['insert']);
 
             $this->personRepository->insert($persons['insert']);
+
+            /**
+             * Update the sku storage with newly created products
+             */
+            $emails = array_keys($persons['insert']);
+
+            $newPersons = $this->personRepository->where(function ($query) use ($emails) {
+                foreach ($emails as $email) {
+                    $query->orWhereJsonContains('emails', [['value' => $email]]);
+                }
+            })->get();
+
+            foreach ($newPersons as $person) {
+                $this->personStorage->set($person->emails[0]['value'], $person->id);
+            }
         }
+    }
+
+    /**
+     * Save attribute values for the person.
+     */
+    public function saveAttributeValues(array $attributeValues): void
+    {
+        $personAttributeValues = [];
+
+        foreach ($attributeValues as $email => $attributeValue) {
+            foreach ($attributeValue as $attribute) {
+                $attribute['entity_id'] = (int) $this->personStorage->get($email);
+
+                $attribute['unique_id'] = implode('|', array_filter([
+                    $attribute['entity_id'],
+                    $attribute['attribute_id'],
+                ]));
+
+                $attribute['entity_type'] = 'persons';
+
+                $personAttributeValues[$attribute['unique_id']] = $attribute;
+            }
+        }
+
+        $this->attributeValueRepository->upsert($personAttributeValues, 'unique_id');
     }
 
     /**
@@ -375,6 +415,43 @@ class Importer extends AbstractImporter
     public function isEmailExist(string $email): bool
     {
         return $this->personStorage->has($email);
+    }
+
+    /**
+     * Prepare attribute values for the person.
+     */
+    public function prepareAttributeValues(array $rowData, array &$attributeValues): void
+    {
+        foreach ($rowData as $code => $value) {
+            if (is_null($value)) {
+                continue;
+            }
+
+            $where = ['code' => $code];
+
+            if ($code === 'name') {
+                $where['entity_type'] = 'persons';
+            }
+
+            $attribute = $this->attributeRepository->findOneWhere($where);
+
+            if (! $attribute) {
+                continue;
+            }
+
+            $typeFields = $this->personRepository->getModel()::$attributeTypeFields;
+
+            $attributeTypeValues = array_fill_keys(array_values($typeFields), null);
+
+            $emails = $this->prepareEmail($rowData['emails']);
+
+            foreach ($emails as $email) {
+                $attributeValues[$email][] = array_merge($attributeTypeValues, [
+                    'attribute_id' => $attribute->id,
+                    $typeFields[$attribute->type] => $value,
+                ]);
+            }
+        }
     }
 
     /**
@@ -387,5 +464,29 @@ class Importer extends AbstractImporter
         $rowData['contact_numbers'] = json_decode($rowData['contact_numbers'], true);
 
         return $rowData;
+    }
+
+    /**
+     * Prepare email from row data.
+     */
+    private function prepareEmail(array|string $emails): Collection
+    {
+        static $cache = [];
+
+        return collect($emails)
+            ->map(function ($emailString) use (&$cache) {
+                if (isset($cache[$emailString])) {
+                    return $cache[$emailString];
+                }
+
+                $decoded = json_decode($emailString, true);
+
+                $emailValue = is_array($decoded)
+                    && isset($decoded[0]['value'])
+                    ? $decoded[0]['value']
+                    : null;
+
+                return $cache[$emailString] = $emailValue;
+            });
     }
 }

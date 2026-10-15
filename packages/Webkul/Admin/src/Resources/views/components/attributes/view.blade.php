@@ -1,8 +1,8 @@
 @props([
     'customAttributes' => [],
-    'entity'           => null,
-    'allowEdit'        => false,
-    'url'              => null,
+    'entity' => null,
+    'allowEdit' => false,
+    'url' => null,
 ])
 
 <div class="flex flex-col gap-1">
@@ -14,9 +14,9 @@
                 <div class="font-medium dark:text-white">
                     @include ($typeView, [
                         'attribute' => $attribute,
-                        'value'     => isset($entity) ? $entity[$attribute->code] : null,
+                        'value' => isset($entity) ? $entity[$attribute->code] : null,
                         'allowEdit' => $allowEdit,
-                        'url'       => $url,
+                        'url' => $url,
                     ])
                 </div>
             </div>

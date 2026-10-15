@@ -4,6 +4,7 @@ namespace Webkul\Admin\Http\Controllers\Settings;
 
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Resources\Json\JsonResource;
+use Illuminate\Support\Arr;
 use Illuminate\Support\Facades\Event;
 use Illuminate\Support\Facades\Mail;
 use Illuminate\View\View;
@@ -53,30 +54,29 @@ class UserController extends Controller
     public function store(): View|JsonResponse
     {
         $this->validate(request(), [
-            'email'            => 'required|email|unique:users,email',
-            'name'             => 'required',
-            'password'         => 'nullable',
+            'email' => 'required|email|unique:users,email',
+            'name' => 'required',
+            'password' => 'nullable',
             'confirm_password' => 'nullable|required_with:password|same:password',
-            'role_id'          => 'required',
+            'role_id' => 'required',
+            'status' => 'boolean|in:0,1',
+            'view_permission' => 'string|in:global,group,individual',
         ]);
 
         $data = request()->all();
 
-        if (isset($data['password']) && $data['password']) {
+        if (
+            isset($data['password'])
+            && $data['password']
+        ) {
             $data['password'] = bcrypt($data['password']);
         }
-
-        $data['status'] = $data['status'] ? 1 : 0;
 
         Event::dispatch('settings.user.create.before');
 
         $admin = $this->userRepository->create($data);
 
-        $admin->view_permission = $data['view_permission'];
-
-        $admin->save();
-
-        $admin->groups()->sync(request('groups') ?? []);
+        $admin->groups()->sync($data['groups'] ?? []);
 
         try {
             Mail::queue(new UserCreatedNotification($admin));
@@ -87,7 +87,7 @@ class UserController extends Controller
         Event::dispatch('settings.user.create.after', $admin);
 
         return new JsonResponse([
-            'data'    => $admin,
+            'data' => $admin,
             'message' => trans('admin::app.settings.users.index.create-success'),
         ]);
     }
@@ -100,7 +100,7 @@ class UserController extends Controller
         $admin = $this->userRepository->with(['role', 'groups'])->findOrFail($id);
 
         return new JsonResponse([
-            'data'   => $admin,
+            'data' => $admin,
         ]);
     }
 
@@ -110,39 +110,39 @@ class UserController extends Controller
     public function update(int $id): JsonResponse
     {
         $this->validate(request(), [
-            'email'            => 'required|email|unique:users,email,'.$id,
-            'name'             => 'required',
-            'password'         => 'nullable',
+            'email' => 'required|email|unique:users,email,'.$id,
+            'name' => 'required|string',
+            'password' => 'nullable|string|min:6',
             'confirm_password' => 'nullable|required_with:password|same:password',
-            'role_id'          => 'required',
+            'role_id' => 'required|integer|exists:roles,id',
+            'status' => 'nullable|boolean|in:0,1',
+            'view_permission' => 'required|string|in:global,group,individual',
         ]);
 
         $data = request()->all();
 
-        if (! $data['password']) {
-            unset($data['password'], $data['confirm_password']);
+        if (empty($data['password'])) {
+            $data = Arr::except($data, ['password', 'confirm_password']);
         } else {
             $data['password'] = bcrypt($data['password']);
         }
 
-        if (auth()->guard('user')->user()->id != $id) {
-            $data['status'] = $data['status'] ? 1 : 0;
+        $authUser = auth()->guard('user')->user();
+
+        if ($authUser->id == $id) {
+            $data['status'] = true;
         }
 
         Event::dispatch('settings.user.update.before', $id);
 
         $admin = $this->userRepository->update($data, $id);
 
-        $admin->view_permission = $data['view_permission'];
-
-        $admin->save();
-
-        $admin->groups()->sync(request()->input('groups') ?? []);
+        $admin->groups()->sync($data['groups'] ?? []);
 
         Event::dispatch('settings.user.update.after', $admin);
 
         return new JsonResponse([
-            'data'    => $admin,
+            'data' => $admin,
             'message' => trans('admin::app.settings.users.index.update-success'),
         ]);
     }

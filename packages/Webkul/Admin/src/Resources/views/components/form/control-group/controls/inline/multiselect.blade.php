@@ -1,6 +1,6 @@
 @props([
     'allowEdit' => true,
-    'data'      => [],
+    'data' => [],
 ])
 
 <v-inline-multi-select-edit

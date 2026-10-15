@@ -7,6 +7,7 @@ use Illuminate\Http\JsonResponse;
 use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Resources\Json\AnonymousResourceCollection;
 use Illuminate\Support\Facades\Event;
+use Illuminate\Support\Facades\Validator;
 use Illuminate\View\View;
 use Prettus\Repository\Criteria\RequestCriteria;
 use Webkul\Admin\DataGrids\Lead\LeadDataGrid;
@@ -18,20 +19,24 @@ use Webkul\Admin\Http\Resources\LeadResource;
 use Webkul\Admin\Http\Resources\StageResource;
 use Webkul\Attribute\Repositories\AttributeRepository;
 use Webkul\Contact\Repositories\PersonRepository;
-use Webkul\DataGrid\Enums\DateRangeOptionEnum;
-use Webkul\Lead\Helpers\Lead;
+use Webkul\Lead\Helpers\MagicAI;
 use Webkul\Lead\Repositories\LeadRepository;
 use Webkul\Lead\Repositories\PipelineRepository;
 use Webkul\Lead\Repositories\ProductRepository;
 use Webkul\Lead\Repositories\SourceRepository;
 use Webkul\Lead\Repositories\StageRepository;
 use Webkul\Lead\Repositories\TypeRepository;
-use Webkul\Lead\Services\LeadService;
+use Webkul\Lead\Services\MagicAIService;
 use Webkul\Tag\Repositories\TagRepository;
 use Webkul\User\Repositories\UserRepository;
 
 class LeadController extends Controller
 {
+    /**
+     * Const variable for supported types.
+     */
+    const SUPPORTED_TYPES = 'pdf,bmp,jpeg,jpg,png,webp';
+
     /**
      * Create a new controller instance.
      *
@@ -68,7 +73,7 @@ class LeadController extends Controller
 
         return view('admin::leads.index', [
             'pipeline' => $pipeline,
-            'columns'  => $this->getKanbanColumns(),
+            'columns' => $this->getKanbanColumns(),
         ]);
     }
 
@@ -97,7 +102,7 @@ class LeadController extends Controller
             $query = app(LeadRepository::class)
                 ->pushCriteria(app(RequestCriteria::class))
                 ->where([
-                    'lead_pipeline_id'       => $pipeline->id,
+                    'lead_pipeline_id' => $pipeline->id,
                     'lead_pipeline_stage_id' => $stage->id,
                 ]);
 
@@ -125,11 +130,11 @@ class LeadController extends Controller
 
                 'meta' => [
                     'current_page' => $paginator->currentPage(),
-                    'from'         => $paginator->firstItem(),
-                    'last_page'    => $paginator->lastPage(),
-                    'per_page'     => $paginator->perPage(),
-                    'to'           => $paginator->lastItem(),
-                    'total'        => $paginator->total(),
+                    'from' => $paginator->firstItem(),
+                    'last_page' => $paginator->lastPage(),
+                    'per_page' => $paginator->perPage(),
+                    'to' => $paginator->lastItem(),
+                    'total' => $paginator->total(),
                 ],
             ];
         }
@@ -148,24 +153,28 @@ class LeadController extends Controller
     /**
      * Store a newly created resource in storage.
      */
-    public function store(LeadForm $request): RedirectResponse
+    public function store(LeadForm $request): RedirectResponse|JsonResponse
     {
         Event::dispatch('lead.create.before');
 
-        $data = $request->all();
+        $data = request()->all();
 
         $data['status'] = 1;
 
-        if (request()->input('lead_pipeline_stage_id')) {
+        if (! empty($data['lead_pipeline_stage_id'])) {
             $stage = $this->stageRepository->findOrFail($data['lead_pipeline_stage_id']);
 
             $data['lead_pipeline_id'] = $stage->lead_pipeline_id;
         } else {
-            $pipeline = $this->pipelineRepository->getDefaultPipeline();
+            if (empty($data['lead_pipeline_id'])) {
+                $pipeline = $this->pipelineRepository->getDefaultPipeline();
+
+                $data['lead_pipeline_id'] = $pipeline->id;
+            } else {
+                $pipeline = $this->pipelineRepository->findOrFail($data['lead_pipeline_id']);
+            }
 
             $stage = $pipeline->stages()->first();
-
-            $data['lead_pipeline_id'] = $pipeline->id;
 
             $data['lead_pipeline_stage_id'] = $stage->id;
         }
@@ -174,15 +183,24 @@ class LeadController extends Controller
             $data['closed_at'] = Carbon::now();
         }
 
-        $data['person']['organization_id'] = empty($data['person']['organization_id']) ? null : $data['person']['organization_id'];
-
         $lead = $this->leadRepository->create($data);
+
+        if (request()->ajax()) {
+            return response()->json([
+                'message' => trans('admin::app.leads.create-success'),
+                'data' => new LeadResource($lead),
+            ]);
+        }
 
         Event::dispatch('lead.create.after', $lead);
 
         session()->flash('success', trans('admin::app.leads.create-success'));
 
-        return redirect()->route('admin.leads.index', $data['lead_pipeline_id']);
+        if (! empty($data['lead_pipeline_id'])) {
+            $params['pipeline_id'] = $data['lead_pipeline_id'];
+        }
+
+        return redirect()->route('admin.leads.index', $params ?? []);
     }
 
     /**
@@ -198,12 +216,14 @@ class LeadController extends Controller
     /**
      * Display a resource.
      */
-    public function view(int $id): View
+    public function view(int $id)
     {
         $lead = $this->leadRepository->findOrFail($id);
 
+        $userIds = bouncer()->getAuthorizedUserIds();
+
         if (
-            $userIds = bouncer()->getAuthorizedUserIds()
+            $userIds
             && ! in_array($lead->user_id, $userIds)
         ) {
             return redirect()->route('admin.leads.index');
@@ -234,8 +254,6 @@ class LeadController extends Controller
 
             $data['lead_pipeline_stage_id'] = $stage->id;
         }
-
-        $data['person']['organization_id'] = empty($data['person']['organization_id']) ? null : $data['person']['organization_id'];
 
         $lead = $this->leadRepository->update($data, $id);
 
@@ -296,14 +314,17 @@ class LeadController extends Controller
 
         Event::dispatch('lead.update.before', $id);
 
-        $lead = $this->leadRepository->update(
-            [
-                'entity_type'            => 'leads',
-                'lead_pipeline_stage_id' => $stage->id,
-            ],
-            $id,
-            ['lead_pipeline_stage_id']
-        );
+        $payload = request()->merge([
+            'entity_type' => 'leads',
+            'lead_pipeline_stage_id' => $stage->id,
+        ])->only([
+            'closed_at',
+            'lost_reason',
+            'lead_pipeline_stage_id',
+            'entity_type',
+        ]);
+
+        $lead = $this->leadRepository->update($payload, $id, ['lead_pipeline_stage_id']);
 
         Event::dispatch('lead.update.after', $lead);
 
@@ -346,7 +367,7 @@ class LeadController extends Controller
 
             return response()->json([
                 'message' => trans('admin::app.leads.destroy-success'),
-            ], 200);
+            ]);
         } catch (\Exception $exception) {
             return response()->json([
                 'message' => trans('admin::app.leads.destroy-failed'),
@@ -355,7 +376,7 @@ class LeadController extends Controller
     }
 
     /**
-     * Mass Update the specified resources.
+     * Mass update the specified resources.
      */
     public function massUpdate(MassUpdateRequest $massUpdateRequest): JsonResponse
     {
@@ -383,7 +404,7 @@ class LeadController extends Controller
     }
 
     /**
-     * Mass Delete the specified resources.
+     * Mass delete the specified resources.
      */
     public function massDestroy(MassDestroyRequest $massDestroyRequest): JsonResponse
     {
@@ -415,20 +436,20 @@ class LeadController extends Controller
     {
         $product = $this->productRepository->updateOrCreate(
             [
-                'lead_id'    => $leadId,
+                'lead_id' => $leadId,
                 'product_id' => request()->input('product_id'),
             ],
             array_merge(
                 request()->all(),
                 [
                     'lead_id' => $leadId,
-                    'amount'  => request()->input('price') * request()->input('quantity'),
+                    'amount' => request()->input('price') * request()->input('quantity'),
                 ],
             )
         );
 
         return response()->json([
-            'data'    => $product,
+            'data' => $product,
             'message' => trans('admin::app.leads.update-success'),
         ]);
     }
@@ -442,7 +463,7 @@ class LeadController extends Controller
             Event::dispatch('lead.product.delete.before', $id);
 
             $this->productRepository->deleteWhere([
-                'lead_id'    => $id,
+                'lead_id' => $id,
                 'product_id' => request()->input('product_id'),
             ]);
 
@@ -464,8 +485,8 @@ class LeadController extends Controller
     public function kanbanLookup()
     {
         $params = $this->validate(request(), [
-            'column'      => ['required'],
-            'search'      => ['required', 'min:2'],
+            'column' => ['required'],
+            'search' => ['required', 'min:2'],
         ]);
 
         /**
@@ -491,207 +512,223 @@ class LeadController extends Controller
     {
         return [
             [
-                'index'                 => 'id',
-                'label'                 => trans('admin::app.leads.index.kanban.columns.id'),
-                'type'                  => 'integer',
-                'searchable'            => false,
-                'search_field'          => 'in',
-                'filterable'            => true,
-                'filterable_type'       => null,
-                'filterable_options'    => [],
+                'index' => 'id',
+                'label' => trans('admin::app.leads.index.kanban.columns.id'),
+                'type' => 'integer',
+                'searchable' => false,
+                'search_field' => 'in',
+                'filterable' => true,
+                'filterable_type' => null,
+                'filterable_options' => [],
                 'allow_multiple_values' => true,
-                'sortable'              => true,
-                'visibility'            => true,
+                'sortable' => true,
+                'visibility' => true,
             ],
             [
-                'index'                 => 'lead_value',
-                'label'                 => trans('admin::app.leads.index.kanban.columns.lead-value'),
-                'type'                  => 'string',
-                'searchable'            => false,
-                'search_field'          => 'in',
-                'filterable'            => true,
-                'filterable_type'       => null,
-                'filterable_options'    => [],
+                'index' => 'lead_value',
+                'label' => trans('admin::app.leads.index.kanban.columns.lead-value'),
+                'type' => 'string',
+                'searchable' => false,
+                'search_field' => 'in',
+                'filterable' => true,
+                'filterable_type' => null,
+                'filterable_options' => [],
                 'allow_multiple_values' => true,
-                'sortable'              => true,
-                'visibility'            => true,
+                'sortable' => true,
+                'visibility' => true,
             ],
             [
-                'index'                 => 'user_id',
-                'label'                 => trans('admin::app.leads.index.kanban.columns.sales-person'),
-                'type'                  => 'string',
-                'searchable'            => false,
-                'search_field'          => 'in',
-                'filterable'            => true,
-                'filterable_type'       => 'searchable_dropdown',
-                'filterable_options'    => [
+                'index' => 'user_id',
+                'label' => trans('admin::app.leads.index.kanban.columns.sales-person'),
+                'type' => 'string',
+                'searchable' => false,
+                'search_field' => 'in',
+                'filterable' => true,
+                'filterable_type' => 'searchable_dropdown',
+                'filterable_options' => [
                     'repository' => UserRepository::class,
-                    'column'     => [
+                    'column' => [
                         'label' => 'name',
                         'value' => 'id',
                     ],
                 ],
                 'allow_multiple_values' => true,
-                'sortable'              => true,
-                'visibility'            => true,
+                'sortable' => true,
+                'visibility' => true,
             ],
             [
-                'index'                 => 'person.id',
-                'label'                 => trans('admin::app.leads.index.kanban.columns.contact-person'),
-                'type'                  => 'string',
-                'searchable'            => false,
-                'search_field'          => 'in',
-                'filterable'            => true,
-                'filterable_options'    => [],
+                'index' => 'person.id',
+                'label' => trans('admin::app.leads.index.kanban.columns.contact-person'),
+                'type' => 'string',
+                'searchable' => false,
+                'search_field' => 'in',
+                'filterable' => true,
+                'filterable_options' => [],
                 'allow_multiple_values' => true,
-                'sortable'              => true,
-                'visibility'            => true,
-                'filterable_type'       => 'searchable_dropdown',
-                'filterable_options'    => [
+                'sortable' => true,
+                'visibility' => true,
+                'filterable_type' => 'searchable_dropdown',
+                'filterable_options' => [
                     'repository' => PersonRepository::class,
-                    'column'     => [
+                    'column' => [
                         'label' => 'name',
                         'value' => 'id',
                     ],
                 ],
             ],
             [
-                'index'                 => 'lead_type_id',
-                'label'                 => trans('admin::app.leads.index.kanban.columns.lead-type'),
-                'type'                  => 'string',
-                'searchable'            => false,
-                'search_field'          => 'in',
-                'filterable'            => true,
-                'filterable_type'       => 'dropdown',
-                'filterable_options'    => $this->typeRepository->all(['name as label', 'id as value'])->toArray(),
+                'index' => 'lead_type_id',
+                'label' => trans('admin::app.leads.index.kanban.columns.lead-type'),
+                'type' => 'string',
+                'searchable' => false,
+                'search_field' => 'in',
+                'filterable' => true,
+                'filterable_type' => 'dropdown',
+                'filterable_options' => $this->typeRepository->all(['name as label', 'id as value'])->toArray(),
                 'allow_multiple_values' => true,
-                'sortable'              => true,
-                'visibility'            => true,
+                'sortable' => true,
+                'visibility' => true,
             ],
             [
-                'index'                 => 'lead_source_id',
-                'label'                 => trans('admin::app.leads.index.kanban.columns.source'),
-                'type'                  => 'string',
-                'searchable'            => false,
-                'search_field'          => 'in',
-                'filterable'            => true,
-                'filterable_type'       => 'dropdown',
-                'filterable_options'    => $this->sourceRepository->all(['name as label', 'id as value'])->toArray(),
+                'index' => 'lead_source_id',
+                'label' => trans('admin::app.leads.index.kanban.columns.source'),
+                'type' => 'string',
+                'searchable' => false,
+                'search_field' => 'in',
+                'filterable' => true,
+                'filterable_type' => 'dropdown',
+                'filterable_options' => $this->sourceRepository->all(['name as label', 'id as value'])->toArray(),
                 'allow_multiple_values' => true,
-                'sortable'              => true,
-                'visibility'            => true,
+                'sortable' => true,
+                'visibility' => true,
             ],
-
             [
-                'index'                 => 'tags.name',
-                'label'                 => trans('admin::app.leads.index.kanban.columns.tags'),
-                'type'                  => 'string',
-                'searchable'            => false,
-                'search_field'          => 'in',
-                'filterable'            => true,
-                'filterable_options'    => [],
+                'index' => 'tags.name',
+                'label' => trans('admin::app.leads.index.kanban.columns.tags'),
+                'type' => 'string',
+                'searchable' => false,
+                'search_field' => 'in',
+                'filterable' => true,
+                'filterable_options' => [],
                 'allow_multiple_values' => true,
-                'sortable'              => true,
-                'visibility'            => true,
-                'filterable_type'       => 'searchable_dropdown',
-                'filterable_options'    => [
+                'sortable' => true,
+                'visibility' => true,
+                'filterable_type' => 'searchable_dropdown',
+                'filterable_options' => [
                     'repository' => TagRepository::class,
-                    'column'     => [
+                    'column' => [
                         'label' => 'name',
                         'value' => 'name',
                     ],
                 ],
             ],
-
-            [
-                'index'              => 'expected_close_date',
-                'label'              => trans('admin::app.leads.index.kanban.columns.expected-close-date'),
-                'type'               => 'date',
-                'searchable'         => false,
-                'searchable'         => false,
-                'sortable'           => true,
-                'filterable'         => true,
-                'filterable_type'    => 'date_range',
-                'filterable_options' => DateRangeOptionEnum::options(),
-            ],
-
-            [
-                'index'              => 'created_at',
-                'label'              => trans('admin::app.leads.index.kanban.columns.created-at'),
-                'type'               => 'date',
-                'searchable'         => false,
-                'searchable'         => false,
-                'sortable'           => true,
-                'filterable'         => true,
-                'filterable_type'    => 'date_range',
-                'filterable_options' => DateRangeOptionEnum::options(),
-            ],
         ];
     }
 
     /**
-     * Create Lead with specified AI.
+     * Create lead with specified AI.
      */
-    public function createByAI(LeadForm $request)
+    public function createByAI()
     {
-        if (! $pdfFile = $request->file('file')) {
-            return response()->json([
-                'status'  => 'error',
-                'message' => trans('admin::app.leads.file.not-found'),
-            ], 400);
+        $leadData = [];
+
+        $errorMessages = [];
+
+        foreach (request()->file('files') as $file) {
+            $lead = $this->processFile($file);
+
+            if (
+                isset($lead['status'])
+                && $lead['status'] === 'error'
+            ) {
+                $errorMessages[] = $lead['message'];
+            } else {
+                $leadData[] = $lead;
+            }
         }
 
-        $extractedData = LeadService::extractDataFromPdf($pdfFile->getPathName());
-
-        if (! empty($extractedData['error'])) {
-            return response()->json([
-                'status'  => 'error',
-                'message' => $extractedData['error'],
-            ], 400);
+        if (isset($errorMessages[0]['code'])) {
+            return response()->json(MagicAI::errorHandler($errorMessages[0]['message']));
         }
-
-        $leadData = Lead::mapAIDataToLead($extractedData);
 
         if (
-            ! empty($leadData['status'])
-            && $leadData['status'] === 'error'
+            empty($leadData)
+            && ! empty($errorMessages)
         ) {
-            return response()->json([
-                'status'  => 'error',
-                'message' => $leadData['message'],
-            ], 400);
+            return response()->json(MagicAI::errorHandler(implode(', ', $errorMessages)), 400);
         }
 
-        return self::leadCreate($leadData);
-    }
-
-    /**
-     * Create lead independent entity.
-     */
-    private function leadCreate($data)
-    {
-        $person = $this->personRepository->create($data['person']);
-
-        $pipeline = $this->pipelineRepository->getDefaultPipeline();
-
-        $stage = $pipeline->stages()->first();
-
-        $data = array_merge($data, [
-            'lead_pipeline_id'       => $pipeline->id,
-            'lead_pipeline_stage_id' => $stage->id,
-            'expected_close_date'    => Carbon::now()->addDays(7),
-            'person'                 => [
-                'id'              => $person->id,
-                'organization_id' => $data['person']['organization_id'] ?? null,
-            ],
-        ]);
-
-        $lead = $this->leadRepository->create($data);
-
-        Event::dispatch('lead.create.after', $lead);
+        if (empty($leadData)) {
+            return response()->json(MagicAI::errorHandler(trans('admin::app.leads.no-valid-files')), 400);
+        }
 
         return response()->json([
             'message' => trans('admin::app.leads.create-success'),
-        ], 200);
+            'leads' => $this->createLeads($leadData),
+        ]);
+    }
+
+    /**
+     * Process file.
+     *
+     * @param  mixed  $file
+     */
+    private function processFile($file)
+    {
+        $validator = Validator::make(
+            ['file' => $file],
+            ['file' => 'required|extensions:'.str_replace(' ', '', self::SUPPORTED_TYPES)]
+        );
+
+        if ($validator->fails()) {
+            return MagicAI::errorHandler($validator->errors()->first());
+        }
+
+        $base64Pdf = base64_encode(file_get_contents($file->getRealPath()));
+
+        $extractedData = MagicAIService::extractDataFromFile($base64Pdf);
+
+        $lead = MagicAI::mapAIDataToLead($extractedData);
+
+        return $lead;
+    }
+
+    /**
+     * Create multiple leads.
+     */
+    private function createLeads($rawLeads): array
+    {
+        $leads = [];
+
+        foreach ($rawLeads as $rawLead) {
+            Event::dispatch('lead.create.before');
+
+            foreach ($rawLead['person']['emails'] as $email) {
+                $person = $this->personRepository
+                    ->whereJsonContains('emails', [['value' => $email['value']]])
+                    ->first();
+
+                if ($person) {
+                    $rawLead['person']['id'] = $person->id;
+
+                    break;
+                }
+            }
+
+            $pipeline = $this->pipelineRepository->getDefaultPipeline();
+
+            $stage = $pipeline->stages()->first();
+
+            $lead = $this->leadRepository->create(array_merge($rawLead, [
+                'lead_pipeline_id' => $pipeline->id,
+                'lead_pipeline_stage_id' => $stage->id,
+            ]));
+
+            Event::dispatch('lead.create.after', $lead);
+
+            $leads[] = $lead;
+        }
+
+        return $leads;
     }
 }

@@ -2,11 +2,14 @@
 
 namespace Webkul\DataGrid;
 
+use Illuminate\Database\Query\Builder;
+use Illuminate\Http\JsonResponse;
 use Illuminate\Pagination\LengthAwarePaginator;
 use Illuminate\Support\Facades\Crypt;
 use Illuminate\Support\Facades\Event;
 use Illuminate\Support\Str;
 use Maatwebsite\Excel\Facades\Excel;
+use Symfony\Component\HttpFoundation\BinaryFileResponse;
 use Webkul\DataGrid\Enums\ColumnTypeEnum;
 use Webkul\DataGrid\Exports\DataGridExport;
 
@@ -262,7 +265,7 @@ abstract class DataGrid
     /**
      * Download export file.
      *
-     * @return \Symfony\Component\HttpFoundation\BinaryFileResponse
+     * @return BinaryFileResponse
      */
     public function downloadExportFile()
     {
@@ -272,7 +275,7 @@ abstract class DataGrid
     /**
      * Process the datagrid.
      *
-     * @return \Symfony\Component\HttpFoundation\BinaryFileResponse|\Illuminate\Http\JsonResponse
+     * @return BinaryFileResponse|JsonResponse
      */
     public function process()
     {
@@ -291,7 +294,7 @@ abstract class DataGrid
      *
      * @deprecated
      *
-     * @return \Symfony\Component\HttpFoundation\BinaryFileResponse|\Illuminate\Http\JsonResponse
+     * @return BinaryFileResponse|JsonResponse
      */
     public function toJson()
     {
@@ -310,11 +313,11 @@ abstract class DataGrid
     protected function validatedRequest(): array
     {
         request()->validate([
-            'filters'     => ['sometimes', 'required', 'array'],
-            'sort'        => ['sometimes', 'required', 'array'],
-            'pagination'  => ['sometimes', 'required', 'array'],
-            'export'      => ['sometimes', 'required', 'boolean'],
-            'format'      => ['sometimes', 'required', 'in:csv,xls,xlsx'],
+            'filters' => ['sometimes', 'required', 'array'],
+            'sort' => ['sometimes', 'required', 'array'],
+            'pagination' => ['sometimes', 'required', 'array'],
+            'export' => ['sometimes', 'required', 'boolean'],
+            'format' => ['sometimes', 'required', 'in:csv,xls,xlsx'],
         ]);
 
         return request()->only(['filters', 'sort', 'pagination', 'export', 'format']);
@@ -323,7 +326,7 @@ abstract class DataGrid
     /**
      * Process all requested filters.
      *
-     * @return \Illuminate\Database\Query\Builder
+     * @return Builder
      */
     protected function processRequestedFilters(array $requestedFilters)
     {
@@ -352,7 +355,7 @@ abstract class DataGrid
     /**
      * Process requested sorting.
      *
-     * @return \Illuminate\Database\Query\Builder
+     * @return Builder
      */
     protected function processRequestedSorting($requestedSort)
     {
@@ -502,11 +505,11 @@ abstract class DataGrid
                 $getUrl = $action->url;
 
                 $record->actions[] = [
-                    'index'  => ! empty($action->index) ? $action->index : 'action_'.$index + 1,
-                    'icon'   => $action->icon,
-                    'title'  => $action->title,
+                    'index' => ! empty($action->index) ? $action->index : 'action_'.$index + 1,
+                    'icon' => $action->icon,
+                    'title' => $action->title,
                     'method' => $action->method,
-                    'url'    => $getUrl($record),
+                    'url' => $getUrl($record),
                 ];
             }
         }
@@ -522,20 +525,20 @@ abstract class DataGrid
         $paginator = $this->paginator->toArray();
 
         return [
-            'id'           => Crypt::encryptString(get_called_class()),
-            'columns'      => $this->formatColumns(),
-            'actions'      => $this->formatActions(),
+            'id' => Crypt::encryptString(get_called_class()),
+            'columns' => $this->formatColumns(),
+            'actions' => $this->formatActions(),
             'mass_actions' => $this->formatMassActions(),
-            'records'      => $this->formatRecords($paginator['data']),
-            'meta'         => [
-                'primary_column'   => $this->primaryColumn,
-                'from'             => $paginator['from'],
-                'to'               => $paginator['to'],
-                'total'            => $paginator['total'],
+            'records' => $this->formatRecords($paginator['data']),
+            'meta' => [
+                'primary_column' => $this->primaryColumn,
+                'from' => $paginator['from'],
+                'to' => $paginator['to'],
+                'total' => $paginator['total'],
                 'per_page_options' => $this->perPageOptions,
-                'per_page'         => $paginator['per_page'],
-                'current_page'     => $paginator['current_page'],
-                'last_page'        => $paginator['last_page'],
+                'per_page' => $paginator['per_page'],
+                'current_page' => $paginator['current_page'],
+                'last_page' => $paginator['last_page'],
             ],
         ];
     }
